@@ -5,7 +5,7 @@ organization  := "org.hymao"
 
 name          := "hymenoptera-phenotypes"
 
-version       := "0.1"
+version       := "0.2"
 
 packageArchetype.java_application
 

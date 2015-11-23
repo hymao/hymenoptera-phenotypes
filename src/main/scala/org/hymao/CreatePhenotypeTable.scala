@@ -19,6 +19,8 @@ import org.semanticweb.owlapi.model.OWLEntity
 import org.semanticweb.owlapi.model.OWLClass
 import org.hymao.Vocab._
 import scala.xml.PrettyPrinter
+import scala.xml.XML
+import org.semanticweb.owlapi.model.OWLObject
 
 object CreatePhenotypeTable extends App {
 
@@ -27,7 +29,9 @@ object CreatePhenotypeTable extends App {
   val label = factory.getOWLAnnotationProperty(OWLRDFVocabulary.RDFS_LABEL.getIRI)
   val manchester = new ManchesterOWLSyntaxOWLObjectRendererImpl()
   val manager = OWLManager.createOWLOntologyManager()
-  manchester.setShortFormProvider(new HTMLShortFormProvider(new AnnotationValueShortFormProvider(List(label), new HashMap(), manager)))
+  val labelProvider = new AnnotationValueShortFormProvider(List(label), new HashMap(), manager)
+  manchester.setShortFormProvider(new HTMLShortFormProvider(labelProvider))
+
   val ontology = manager.loadOntologyFromOntologyDocument(new File(inputFile))
   val table =
     <table>
@@ -43,9 +47,9 @@ object CreatePhenotypeTable extends App {
             state <- getStates(character, ontology)
           } yield {
             <tr>
-              <td> { label(character, ontology) }</td>
-              <td> { label(state, ontology) }</td>
-              <td> { translate(getPhenotype(state, ontology)) }</td>
+              <td> { labelProvider.getShortForm(character) }</td>
+              <td> { labelProvider.getShortForm(state) }</td>
+              <td> { XML.loadString(translate(getPhenotype(state, ontology))) }</td>
             </tr>
           }
         }
@@ -54,10 +58,13 @@ object CreatePhenotypeTable extends App {
   val prettyPrinter = new PrettyPrinter(9999, 2)
   println(prettyPrinter.format(table))
 
-  def getCharacters(ontology: OWLOntology): Iterable[OWLIndividual] = Character.getIndividuals(ontology.getImportsClosure)
+  def getCharacters(ontology: OWLOntology): Iterable[OWLNamedIndividual] = Character.getIndividuals(ontology.getImportsClosure)
+    .collect { case named: OWLNamedIndividual => named }
 
-  def getStates(character: OWLIndividual, ontology: OWLOntology): Iterable[OWLIndividual] = ontology.getImportsClosure.flatMap(ont =>
-    character.getObjectPropertyValues(can_have_state, ont) ++ character.getObjectPropertyValues(may_have_state_value, ont))
+  def getStates(character: OWLIndividual, ontology: OWLOntology): Iterable[OWLNamedIndividual] = ontology.getImportsClosure.flatMap(ont =>
+    (character.getObjectPropertyValues(can_have_state, ont) ++
+      character.getObjectPropertyValues(may_have_state_value, ont))
+      .collect { case named: OWLNamedIndividual => named })
 
   def getPhenotype(state: OWLIndividual, ontology: OWLOntology): OWLClassExpression = {
     val allValuesFroms = state.getTypes(ontology.getImportsClosure).filter(_.isInstanceOf[OWLObjectAllValuesFrom]).map(_.asInstanceOf[OWLObjectAllValuesFrom]).filter(_.getProperty == denotes)
@@ -66,15 +73,13 @@ object CreatePhenotypeTable extends App {
     else equivClasses.head
   }
 
-  def translate(phenotype: OWLClassExpression): String = manchester.render(phenotype).replaceAll("\n", "").replaceAll("\\s+", " ")
-
-  def label(item: OWLIndividual, ontology: OWLOntology): String = item match {
-    case named: OWLNamedIndividual => {
-      val labelAnnotations = ontology.getAxioms(AxiomType.ANNOTATION_ASSERTION, true).filter(_.getSubject == named.getIRI).filter(_.getProperty.getIRI == label)
-      labelAnnotations.headOption.map(_.getValue.toString).getOrElse(item.toString)
-    }
-    case _ => item.toString
-  }
+  def translate(phenotype: OWLClassExpression): String = "<span>" +
+    manchester.render(phenotype)
+    .replaceAll("\n", "")
+    .replaceAll("\\s+", " ")
+    .replaceAllLiterally("< ", "&lt; ")
+    .replaceAllLiterally("<= ", "&lt;= ") +
+    "</span>"
 
   class HTMLShortFormProvider(labelProvider: ShortFormProvider) extends ShortFormProvider {
 
@@ -83,7 +88,7 @@ object CreatePhenotypeTable extends App {
     }
 
     def getShortForm(entity: OWLEntity): String =
-      s"""<a href="${entity.getIRI.toString}" class="${entity.getEntityType.getName}">${labelProvider.getShortForm(entity)}</a>"""
+      <a href={ entity.getIRI.toString } class={ entity.getEntityType.getName }>{ labelProvider.getShortForm(entity) }</a>.toString
 
   }
 
